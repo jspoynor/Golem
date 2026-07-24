@@ -273,16 +273,24 @@ writing new ones. Never delete — past plans stay auditable.
 One JSON object per line. **Routing fields only:**
 
 ```
-id          T-014
-deps        [T-009, T-011]
-status      pending | running | complete | failed
-complexity  light | standard
-commit      sha, once accepted
-verify      optional — node-specific command overriding config.verify
+id              T-014
+deps            [T-009, T-011]
+status          pending | running | complete | failed
+complexity      light | standard
+commit          sha, once accepted
+verify          optional — node-specific command overriding config.verify
+criteria_count  integer — how many acceptance criteria the brief states
 ```
 
 **No acceptance criteria in the index.** The orchestrator is a router, not a judge
 (§7.2). Judgment belongs to the hook (§8.1) and the reviewer (§8.2).
+
+`criteria_count` does not violate that rule. It is **a count, not criteria** — the
+prose stays in the brief (§6.3), and the orchestrator never sees it. The integer is a
+routing field like any other: the planner writes it when it writes the brief, and §7.2
+compares it against the reviewer's `criteria_checked` to detect a reviewer that did not
+finish. Storing the number of criteria tells the orchestrator nothing about what they
+say.
 
 One line per node means a status update is a single-line replacement — the edit an
 agent performs most reliably.
@@ -392,6 +400,21 @@ The orchestrator does not evaluate whether work is correct. It receives a verdic
 routes on it. Judgment by the component that wants the task to be done is worthless —
 that is why §8 assigns it to a deterministic hook and an independent reviewer.
 
+#### §7.2.1 Coverage check — the one arithmetic the orchestrator does
+
+The orchestrator compares the node's `criteria_count` (§6.2) against the reviewer's
+`criteria_checked` (§7.5). **Mismatch fails the node, closed.** A reviewer that examined
+four of seven criteria has not reviewed the node, whatever verdict it returned.
+
+**This does not make the orchestrator a judge.** It compares two integers. It never reads
+criteria prose, never decides whether a criterion was met, and never forms an opinion
+about the work — a `pass` on 7 of 7 is accepted without inspection. Counting is not
+judging. The distinction is exactly the one §7.2 draws: the orchestrator is checking that
+the review *happened*, not what it concluded.
+
+Fails closed for the same reason as §8.1.2: a reviewer that returns no `criteria_checked`
+at all is a reviewer that cannot demonstrate it finished.
+
 ### §7.3 The DAG is frozen
 
 No mid-run replanning. Spec changes require a halt and a fresh plan (§9.4).
@@ -421,6 +444,16 @@ plan_impact   see below, or null
 detail_ref    .golem/runs/<id>/T-014.md
 model_used    the model that actually ran — see §3.3
 ```
+
+**Reviewer only, additionally:**
+
+```
+criteria_checked  integer — how many acceptance criteria it actually examined
+```
+
+Checked against the node's `criteria_count` by §7.2.1. The reviewer reports what it
+examined, not what the brief listed; a reviewer that stopped early must report the lower
+number for the check to mean anything.
 
 `detail_ref` is the escape hatch: the orchestrator reads the full writeup **on demand**
 when it decides it needs to. Cheap by default, expensive by choice — nothing is lost,
@@ -620,6 +653,41 @@ open-ended debugging (§9.1).
 to the user.
 **No scaffolder agent** — scaffold-first is a milestone in the DAG, built by an
 implementer like anything else.
+
+### §10.1 `maxTurns` — implementers only, and never the reviewer
+
+`maxTurns` is a confirmed frontmatter field (`findings/T-001.md` §1.2). Apply it to
+`implementer-light` and `implementer-standard` as a safety belt.
+
+**Do not set `maxTurns` on the reviewer. This is a prohibition, not an omission** — it is
+written here so a later session does not add it "for consistency."
+
+The reason is an asymmetry in what truncation costs. A truncated subagent still returns
+something: the docs describe no distinct failure signal on exhaustion, so a `maxTurns`
+cutoff and a clean finish look alike from outside.
+
+- **A truncated implementer is caught.** It leaves the work unfinished, `config.verify`
+  fails, and the gate fails the node correctly (§8.1). The safety belt is free.
+- **A truncated reviewer is caught by nothing.** It returns a verdict formed on
+  incomplete analysis, and a `pass` from a reviewer that stopped halfway is
+  indistinguishable from a real one. §8.2 exists precisely to catch what the
+  deterministic gate cannot — so silently truncating it defeats the layer built to be the
+  last check. Capping the reviewer trades an unbounded review for an unsound one.
+
+The reviewer is bounded structurally instead: a finite diff, a finite criteria list, and
+read-only tools (§8.3).
+
+### §10.2 `criteria_checked` covers more than truncation
+
+§7.2.1's coverage check is stated in terms of the `maxTurns` hazard, but it does not
+depend on it. Any reviewer that examined fewer criteria than the brief lists fails the
+node — whether it ran out of turns, lost the thread on a long diff, was compacted
+mid-review, or simply declared victory after the first three criteria and stopped.
+
+That last case is the common one and has nothing to do with turn limits. A reviewer
+convinced early that the code is fine has the same incentive to wrap up that §8.2 exists
+to counteract. The check makes finishing observable rather than asserted, which is the
+same move §8.1 makes for the gate.
 
 ---
 

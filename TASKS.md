@@ -248,11 +248,25 @@ orchestrator being asked to judge**. Verify by deliberately breaking the code.
 **Deps:** T-013
 
 Enforce §7.5 across all subagents, including the `plan_impact` filter — no affected
-node id, not a plan impact.
+node id, not a plan impact. Also `model_used` (§3.3.1) and, on the reviewer,
+`criteria_checked` (§7.2.1).
 
-**Acceptance:** a subagent returning prose instead of the structured shape is
-detectable. An observation with no node id lands in the detail file, not in
-`plan_impact`.
+Implement the coverage check here: the orchestrator compares the reviewer's
+`criteria_checked` against the node's `criteria_count` from `tasks.jsonl`, and **fails
+the node closed on mismatch or on a missing value.** Comparing two integers is not
+judging (§7.2.1) — do not let the orchestrator read criteria prose to "resolve" a
+mismatch.
+
+**Acceptance:**
+
+- A subagent returning prose instead of the structured shape is detectable.
+- An observation with no node id lands in the detail file, not in `plan_impact`.
+- A reviewer reporting `criteria_checked` lower than the node's `criteria_count` fails
+  the node. Verify with a node whose brief lists more criteria than the reviewer is
+  given room to examine.
+- A reviewer omitting `criteria_checked` entirely fails the node rather than defaulting
+  to pass.
+- A matching count passes without the orchestrator inspecting any criterion.
 
 ---
 
