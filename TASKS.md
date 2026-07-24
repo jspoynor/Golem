@@ -24,9 +24,10 @@ Then `/reload-plugins` and exercise the skill under test.
 
 No code. Establishes facts the rest of the build depends on.
 
-**All M0 findings are written to `FINDINGS.md` at repo root and committed.** Session
-output is not durable — a later session cannot read a report that only existed in a
-terminal. Each task appends its own section; none overwrite the file.
+**All M0 findings are written to `findings/T-00N.md` at repo root and committed** —
+one file per task, mirroring the per-node brief layout the plugin itself uses (§6.3).
+Session output is not durable: a later session cannot read a report that only existed
+in a terminal.
 
 ### T-001 · Verify subagent frontmatter fields
 
@@ -47,11 +48,10 @@ they behave:
 - Confirm what an **omitted** `model` resolves to. Sources disagree. Golem pins
   explicitly either way (§3.3), but the answer should be recorded.
 
-**Contract:** writes `## Subagent fields` to `FINDINGS.md`. T-003 reads it.
+**Contract:** writes `findings/T-001.md`. T-003 reads it.
 
-**Acceptance:** `FINDINGS.md` contains a `## Subagent fields` section naming each
-field as confirmed, absent, or uncertain, with the doc URL for each. The file is
-committed.
+**Acceptance:** `findings/T-001.md` names each field as confirmed, absent, or
+uncertain, with the doc URL for each. The file is committed.
 
 ### T-002 · Verify skill namespacing and hook events
 
@@ -61,16 +61,15 @@ Confirm the final invocation names for the six skills in §4 (expect
 `/golem:run` form). Confirm which hook event fires on subagent completion — this is
 what §8.1 depends on, and it is the single most load-bearing mechanism in the design.
 
-**Contract:** writes `## Skills and hooks` to `FINDINGS.md`. T-003 reads it, and T-014
-depends on the hook event name recorded here.
+**Contract:** writes `findings/T-002.md`. T-003 reads it, and T-014 depends on the
+hook event name recorded here.
 
-**Acceptance:** `FINDINGS.md` contains a `## Skills and hooks` section with the exact
-invocation strings and the exact hook event name plus its input schema. The file is
-committed.
+**Acceptance:** `findings/T-002.md` contains the exact invocation strings and the
+exact hook event name plus its input schema. The file is committed.
 
 ### T-003 · Reconcile SPEC.md with findings
 
-**Deps:** T-001, T-002 — reads `FINDINGS.md`, not session history
+**Deps:** T-001, T-002 — reads `findings/`, not session history
 
 Amend `SPEC.md` in place where T-001/T-002 contradict it. If `effort` does not exist,
 degrade §3.1 tiers to model-only and say so. If the subagent-completion hook event
@@ -78,7 +77,7 @@ doesn't exist or can't run a command, **stop and raise it** — §8.1 is not
 substitutable with an instruction.
 
 **Acceptance:** `SPEC.md` contains no unverified assumptions. Every change is listed
-in the session output.
+in the commit message, not just reported in session.
 
 ---
 
