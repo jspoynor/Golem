@@ -1,0 +1,8 @@
+{
+  "name": "golem",
+  "version": "0.1.0",
+  "description": "Interview, decompose, and execute large-scope work with an enforced verification gate.",
+  "author": {
+    "name": "Jackson"
+  }
+}
