@@ -69,6 +69,8 @@ golem/
 │   └── reviewer.md
 ├── hooks/
 │   └── hooks.json
+├── bin/
+│   └── criteria-count       derives and re-checks criteria_count (§6.1.1)
 └── README.md
 ```
 
@@ -268,6 +270,23 @@ thinking is the success case, and a change-requirement punishes exactly that cas
 Move the existing `tasks.jsonl` and `tasks/` to `.golem/archive/<timestamp>/` before
 writing new ones. Never delete — past plans stay auditable.
 
+#### §6.1.1 Derivation is the last step of `/golem:plan`
+
+After every brief is written, `/golem:plan` derives each node's `criteria_count`
+(§6.2.1) by counting the list items under `## Acceptance criteria` and writes the number
+into `tasks.jsonl`. Ordering is not incidental: the count is taken from the finished
+brief, so a planner that revises criteria while drafting cannot leave a stale number
+behind.
+
+**Implemented as an executable in the plugin's `bin/`, not as agent judgment.** The
+planner is the component whose work is being counted, and asking it how many criteria it
+wrote is asking it to grade its own homework — the same objection §7.2 raises about
+judgment by the component that wants the task done. A script that counts list items
+cannot disagree with the file, cannot round, and cannot be persuaded.
+
+The same executable serves the §6.2.2 startup check, so the count and the recount are
+the same code by construction. Two implementations could drift; one cannot.
+
 ### §6.2 The index — `tasks.jsonl`
 
 One JSON object per line. **Routing fields only:**
@@ -286,11 +305,46 @@ criteria_count  integer — how many acceptance criteria the brief states
 (§7.2). Judgment belongs to the hook (§8.1) and the reviewer (§8.2).
 
 `criteria_count` does not violate that rule. It is **a count, not criteria** — the
-prose stays in the brief (§6.3), and the orchestrator never sees it. The integer is a
-routing field like any other: the planner writes it when it writes the brief, and §7.2
-compares it against the reviewer's `criteria_checked` to detect a reviewer that did not
-finish. Storing the number of criteria tells the orchestrator nothing about what they
-say.
+prose stays in the brief (§6.3), and the orchestrator never sees it. §7.2.1 compares it
+against the reviewer's `criteria_checked` to detect a reviewer that did not finish.
+Storing the number of criteria tells the orchestrator nothing about what they say.
+
+#### §6.2.1 `criteria_count` is derived, never authored
+
+**The planner does not supply this number from its own assessment of what it wrote.** It
+is produced mechanically by counting the list items under `## Acceptance criteria` in the
+brief (§6.1.1).
+
+This matters more than it looks. `criteria_count` is the *reference* the §7.2.1 check
+compares against, so a wrong reference breaks the check in both directions — and the
+dangerous direction is silent. A count that is too low **matches a truncated reviewer's
+`criteria_checked` exactly**, and the node passes. That reopens the exact hole §7.2.1 was
+built to close, one layer up, with no symptom.
+
+An authored number can be wrong. A mechanical count cannot disagree with the file it
+counted.
+
+**Zero is not a valid count.** A brief with no acceptance criteria has no reviewer
+contract (§6.3), so the reviewer has nothing to check and §7.2.1 degenerates to `0 == 0`
+— a node that passes review by having nothing to review. The planner **fails** rather
+than emitting `0`.
+
+#### §6.2.2 Startup correspondence check
+
+`/golem:run` verifies, before dispatching any node, that every index line:
+
+- parses as JSON,
+- has a matching brief file in `.golem/tasks/`, and
+- carries a `criteria_count` still equal to that brief's actual criteria count.
+
+**Any mismatch halts before the first node runs.** Re-deriving at startup costs one pass
+over files already on disk and catches the case §2.2 forbids but cannot prevent: a
+hand-edited brief. Deriving the count at plan time makes it right when written; checking
+it at run time makes it still right when used. Between those two moments is a human with
+an editor.
+
+This is the same fail-closed posture as §8.1.2 and §7.2.1, applied to the reference value
+itself.
 
 One line per node means a status update is a single-line replacement — the edit an
 agent performs most reliably.
@@ -320,7 +374,11 @@ What downstream nodes require from this — interface shape, exported names, ret
 types. **One hop only.** Never the dependents' own goals.
 
 ## Acceptance criteria
-Concrete and checkable. The reviewer's contract. Full prose lives here.
+- Concrete and checkable. The reviewer's contract. Full prose lives here.
+- **One criterion per top-level list item, at least one item.** This section is counted
+  mechanically (§6.1.1) and the count is load-bearing (§6.2.1), so the format is a
+  requirement, not a style preference. Prose paragraphs here are uncountable; a
+  criterion split across two bullets counts as two.
 
 ## Context
 Conventions, patterns, what the planner learned during reconnaissance.

@@ -185,14 +185,25 @@ plus write to `.golem/` only.
 **Deps:** T-010
 
 Emit `tasks.jsonl` (§6.2, routing fields only) and `tasks/T-NNN.md` briefs (§6.3).
-Archive the previous plan first (§6.1).
+Archive the previous plan first (§6.1). Build `bin/criteria-count` and run it as the
+final step to derive `criteria_count` (§6.1.1) — the planner never authors that number.
 
 **Contract:** `tasks.jsonl` is parsed by the orchestrator in M6. Field names are fixed
-by §6.2. **No acceptance criteria in the index** — §7.2.
+by §6.2. **No acceptance criteria in the index** — §7.2. `bin/criteria-count` is reused
+by the §6.2.2 startup check in T-016; one implementation, not two.
 
-**Acceptance:** every index line parses as JSON and has a matching brief file. Every
-brief has all §6.3 sections. Re-running archives the prior plan rather than deleting
-it. No brief contains the full spec text — only `spec:` pointers.
+**Acceptance:**
+
+- Every index line parses as JSON and has a matching brief file.
+- Every brief has all §6.3 sections. No brief contains the full spec text — only
+  `spec:` pointers.
+- Re-running archives the prior plan rather than deleting it.
+- **Every index line's `criteria_count` equals the number of acceptance criteria in its
+  brief.** Verify by regenerating a plan and comparing the emitted counts against the
+  briefs — not by asking the planner what it wrote.
+- **A brief with zero acceptance criteria makes the planner fail, not emit `0`**
+  (§6.2.1). Verify with a node deliberately drafted without criteria. A `0` here would
+  make §7.2.1 degenerate to `0 == 0` and pass a node with nothing reviewed.
 
 ### T-012 · Decomposition rules
 
@@ -277,10 +288,20 @@ mismatch.
 **Deps:** T-011, T-015
 
 Implement §7.6. Load `tasks.jsonl` once at start (§7.4), hold the DAG in context,
-dispatch by `complexity`, @-mention agents explicitly.
+dispatch by `complexity`, @-mention agents explicitly. Run the §6.2.2 startup
+correspondence check before dispatching anything, reusing `bin/criteria-count` from
+T-011.
 
-**Acceptance:** a 5-node plan executes start to finish. The orchestrator reads
-`tasks.jsonl` exactly once — verify by inspecting the session.
+**Acceptance:**
+
+- A 5-node plan executes start to finish.
+- The orchestrator reads `tasks.jsonl` exactly once — verify by inspecting the session.
+  (The startup check reads briefs, not the index, so it does not violate §7.4.)
+- **A deliberately corrupted `criteria_count` halts the run before any node
+  dispatches.** Verify both directions: edit a brief to add a criterion without
+  touching the index, and edit an index line's count directly. Neither may reach node
+  execution.
+- An index line with no matching brief also halts.
 
 ### T-017 · Context hygiene
 
