@@ -40,7 +40,14 @@ only on explicit skill invocation.
 
 **The plugin's `settings.json` must not set the `agent` key.** That key activates a
 custom agent as the main thread and would silently change default Claude Code
-behavior for every session. Forbidden.
+behavior for every session. Forbidden. The key is real and has exactly that documented
+effect (`findings/T-001.md` §3.3) — this prohibition is not hypothetical.
+
+**Every Golem skill sets `disable-model-invocation: true`.** Without it the model may
+auto-invoke a skill from task context (`findings/T-002.md` §1), which is not "activates
+only on explicit skill invocation" — it is Golem deciding on its own to start
+interviewing or planning inside someone else's session. The six skills in §4 are
+user-invoked or they do not fire.
 
 ### §1.4 Directory structure
 
@@ -87,6 +94,7 @@ golem/
     └── <run-id>/
         ├── progress.log
         ├── T-014.md         subagent writeups, accumulates across attempts
+        ├── gate-<agent_id>.json   gate verdict + exit code, written by the hook (§8.1)
         └── halt.md          written on halt
 ```
 
@@ -147,6 +155,35 @@ retries, halt-on-failure, serial execution — not by a timer.
 Agent definitions read model and effort from `config.tiers` rather than hardcoding
 them, so they're tunable per repo. **Every agent pins its model explicitly. None
 inherit.**
+
+Both halves of a tier are pinnable: `model` and `effort` are confirmed subagent
+frontmatter fields, `effort` taking `low | medium | high | xhigh | max`
+(`findings/T-001.md` §1.1). `model` accepts the aliases `sonnet`, `opus`, `haiku`,
+`fable`, or a full model ID such as `claude-opus-5` (§1.4 there). §3.1 uses only
+`sonnet`/`opus` and `medium`/`high`, all valid as written.
+
+#### §3.3.1 A pin is not a guarantee — so make the violation loud
+
+Frontmatter is **third** in the documented resolution order, behind the
+`CLAUDE_CODE_SUBAGENT_MODEL` environment variable and the per-invocation parameter. An
+organization's `availableModels` allowlist can also demote a pinned model to the
+inherited one **with no error** (`findings/T-001.md` §2).
+
+So a user with that variable exported silently runs every Golem tier on one model, and
+the reviewer quietly stops being the independent strong-model check §8.2 depends on —
+while still returning confident verdicts. A confident verdict from a downgraded reviewer
+is the most expensive failure this design has.
+
+Golem cannot prevent this from a plugin. It can refuse to run blind:
+
+- Every subagent reports `model_used` in its return shape (§7.5).
+- **`/golem:run` halts at run start if the reviewer resolved to the same tier as the
+  implementer.** The independence in §8.2 is structural, not decorative; without it the
+  run is not doing what it claims to be doing.
+
+The wording above stands as written — agents pin, and none are *written* to inherit. What
+changes is that an override is detected and stops the run rather than degrading it
+silently.
 
 ---
 
@@ -318,6 +355,28 @@ sometimes be wrong. When an implementer finds the contract unsatisfiable, that i
 The planner **cannot edit source files.** Read plus write to `.golem/` only. A planner
 that can edit source will start coding instead of planning.
 
+This takes **two mechanisms**, because neither is sufficient alone. A `tools` allowlist
+restricts *which tools*, never *which paths*, and plugin subagents silently ignore the
+`permissionMode` frontmatter field (`findings/T-001.md` §3.1).
+
+1. **`tools` frontmatter allowlist** — structural, and it stays. It withholds `Edit` and,
+   critically, **withholds `Bash`**: a path guard on `Write`/`Edit` does not stop
+   `bash -c 'echo … > src/foo.ts'`. Do not add `Bash` to the planner for convenience.
+2. **A `PreToolUse` hook** in `hooks/hooks.json` denying `Write`/`Edit` outside `.golem/`.
+   This supplies the path scoping the allowlist cannot express.
+
+`PreToolUse` blocking was verified empirically rather than assumed, since hook exit codes
+had already misled this design once (`findings/T-002.md` §5): both exit 2 and
+`hookSpecificOutput.permissionDecision: "deny"` genuinely block the call, and the file is
+never written. **Use the JSON `deny` form** — it is the documented interface and carries a
+structured reason.
+
+**Scope the deny to the planner by `agent_type`.** The payload's `agent_type` is the
+plugin-scoped id (`golem:planner`), and the field is **absent entirely on main-thread
+calls.** An unscoped guard therefore blocks the orchestrator's own commits (§7.8) and
+paralyzes `/golem:run` — observed, not hypothetical. Deny only when `agent_type` is the
+planner; allow everything else.
+
 ---
 
 ## §7 Execution (`/golem:run`)
@@ -360,6 +419,7 @@ verdict       pass | fail | spec-problem
 summary       2–3 lines — what changed
 plan_impact   see below, or null
 detail_ref    .golem/runs/<id>/T-014.md
+model_used    the model that actually ran — see §3.3
 ```
 
 `detail_ref` is the escape hatch: the orchestrator reads the full writeup **on demand**
@@ -386,7 +446,7 @@ plan built on a false premise.
 1. Select next ready node from the in-context DAG.
 2. Dispatch to `implementer-light` or `implementer-standard` per node `complexity`.
    **@-mention the agent explicitly** — never rely on auto-delegation.
-3. Verification gate fires (§8.1).
+3. Verification gate fires; read its verdict from the gate file, failing closed (§8.1).
 4. On pass: `reviewer` adjudicates (§8.2).
 5. On accept: commit (§7.8), mark complete, continue.
 6. On failure: §9.
@@ -410,13 +470,62 @@ at all.
 
 ## §8 Verification
 
-### §8.1 The deterministic gate is a hook
+### §8.1 The deterministic gate
 
-Implemented in `hooks/hooks.json` on the appropriate subagent-completion event, **not**
-as an instruction in a skill. An instruction saying "verify before marking complete" is
-a suggestion to a system strongly motivated to report success. A hook is a fact.
+**The requirement, stated first because the mechanism has already changed once:**
 
-Runs `config.verify` plus any node-level `verify` override. Exit 0 or the node fails.
+> The verdict is produced by something that is not the agent being judged, and the
+> orchestrator cannot proceed without it.
+
+An instruction saying "verify before marking complete" is a suggestion to a system
+strongly motivated to report success. That is what this section exists to rule out. A
+hook was one way to obtain the property above, not the property itself.
+
+#### §8.1.1 Mechanism
+
+The `SubagentStop` hook cannot fail a node and has no return path to the orchestrator
+(`findings/T-002.md` §3). The verdict therefore travels through a file.
+
+- The `SubagentStop` hook in `hooks/hooks.json` runs `config.verify` plus any node-level
+  `verify` override.
+- It writes `.golem/runs/<id>/gate-<agent_id>.json` containing the verdict and the exit
+  code. `agent_id` and `agent_type` are in the hook payload, so the file keys to the node
+  without the orchestrator passing anything down.
+- The orchestrator reads that file after the subagent returns, and routes on it. It is
+  still a router (§7.2) — it reads a fact off disk, it does not judge.
+
+#### §8.1.2 Fail closed
+
+Missing, unreadable, or malformed all mean **the node failed.** A gate whose absence is
+survivable is not a gate.
+
+**Narrow fallback:** if the gate file is *missing*, the orchestrator runs `config.verify`
+itself before declaring failure. This costs nothing on the normal path and fires only
+when something has already gone wrong — a hook that did not fire, a crashed gate script.
+It does not apply to a file that exists and records a failure; that verdict stands.
+
+#### §8.1.3 The gate hook must never exit 2
+
+**Forbidden, and this prohibition is load-bearing.** On `SubagentStop`, exit 2 does not
+fail the node — it blocks the subagent from stopping and feeds stderr back to it. Observed
+behavior: the subagent argues with the gate, burns ~10 turns against an internal ceiling,
+then stops anyway and returns **success**. The run pays for the wasted turns and gets the
+wrong answer.
+
+That is worse than no gate at all — it is §4.1's "looks like a gate but isn't," one layer
+up. **The gate hook always exits 0.** The verdict lives in the file, never in the exit
+code.
+
+Recorded because a future session that discovers the gate "not blocking anything" will
+reach for exit 2 as the obvious fix. It is not a fix.
+
+#### §8.1.4 Known v1 limitation — gate files are unsigned
+
+The implementer holds `bash` and `edit`, so it could in principle forge a gate file.
+Accepted, and **do not build signing.** There is no incentive gradient toward forging an
+artifact the implementer was never told exists, and the read-only reviewer (§8.2) remains
+an independent second check on the same work. The cost of a signing scheme exceeds the
+risk it removes at v1.
 
 ### §8.2 The reviewer, layered on top
 
@@ -526,3 +635,5 @@ Explicitly out of scope. Do not implement, and do not helpfully add:
 - Anything set via the plugin's `settings.json` `agent` key
 - A DAG validator (unnecessary by §2.2)
 - Merging old and new DAGs on re-plan (unnecessary by §9.4)
+- Signing or tamper-proofing gate files (accepted limitation, §8.1.4)
+- Failing a node via hook exit code — it does not work and costs turns (§8.1.3)

@@ -227,11 +227,18 @@ pins a model explicitly; none inherit.
 
 **Deps:** T-002, T-013
 
-Implement `hooks/hooks.json` on the subagent-completion event from T-002. Runs
-`config.verify` plus any node-level override. Non-zero exit fails the node.
+Implement `hooks/hooks.json` on `SubagentStop` (the event confirmed in T-002). Runs
+`config.verify` plus any node-level override, **always exits 0**, and writes the verdict
+to `.golem/runs/<id>/gate-<agent_id>.json`. The orchestrator reads that file and fails
+closed. See §8.1 — including §8.1.3, which forbids exit 2 and says why.
 
-**This must be a hook, not an instruction** (§8.1). If T-002 found no suitable event,
-stop and raise it rather than substituting a prompt.
+**The verdict must come from something other than the agent being judged, never from an
+instruction** (§8.1). Stop and raise if the deterministic gate cannot be enforced by a
+component other than the agent being judged.
+
+*(Original trigger named the hook event specifically. T-002 found the event exists and
+runs commands, yet still cannot enforce §8.1 — so an event-shaped trigger would not have
+fired on the actual problem. It now describes the property.)*
 
 **Acceptance:** a subagent that produces failing code is marked failed **without the
 orchestrator being asked to judge**. Verify by deliberately breaking the code.
